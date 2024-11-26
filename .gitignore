@@ -10,3 +10,12 @@ compile_commands.json
 CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
+*.a
+*.ci
+*.bin_timestamp
+*.bin
+*.map
+*.ninja*
+build/
+.devcontainer/
+.vscode
