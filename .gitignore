@@ -19,3 +19,6 @@ CMakeUserPresets.json
 build/
 .devcontainer/
 .vscode
+.DS_Store
+
+*/managed-components/
