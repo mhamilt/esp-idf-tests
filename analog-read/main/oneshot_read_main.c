@@ -9,19 +9,60 @@
 #include <esp_log.h>
 #include <esp_adc/adc_oneshot.h>
 #include <esp_timer.h>
+#include <driver/gpio.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#include "sdkconfig.h"
+#include "esp_log.h"
+
 //-----------------------------------------------------------------------------
 const static char *TAG = "EXAMPLE";
+
+#define ECHO_TEST_TXD (CONFIG_EXAMPLE_UART_TXD)
+#define ECHO_TEST_RXD (CONFIG_EXAMPLE_UART_RXD)
+#define ECHO_TEST_RTS (UART_PIN_NO_CHANGE)
+#define ECHO_TEST_CTS (UART_PIN_NO_CHANGE)
+#define ECHO_UART_PORT_NUM      (CONFIG_EXAMPLE_UART_PORT_NUM)
+#define ECHO_UART_BAUD_RATE     (CONFIG_EXAMPLE_UART_BAUD_RATE)
+#define ECHO_TASK_STACK_SIZE    (CONFIG_EXAMPLE_TASK_STACK_SIZE)
+#define BUF_SIZE (1024)
 //-----------------------------------------------------------------------------
 // ADC1 Channels
 #define EXAMPLE_ADC_ATTEN ADC_ATTEN_DB_12
-static adc_channel_t adc_channels[] = {0, 2, 3, 4, 5, 6};
+static adc_channel_t adc_channels[] = {0, 1, 2, 3, 4, 5, 6};
 static const size_t num_channels = sizeof(adc_channels) / sizeof(adc_channel_t);
+static const size_t num_mux_channels = 7;
+static int adc_raw[49];
+// static const size_t num_sensors = sizeof(adc_raw) / sizeof(int);
+
 //-----------------------------------------------------------------------------
-static int adc_raw[14];
+
 static bool example_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle);
 //-----------------------------------------------------------------------------
-void app_main(void)
+static void analog_read_task(void *arg)
 {
+    uart_config_t uart_config = {
+        .baud_rate = ECHO_UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    int intr_alloc_flags = 0;
+
+    ESP_ERROR_CHECK(uart_driver_install(ECHO_UART_PORT_NUM, BUF_SIZE * 2, 0, 0, NULL, intr_alloc_flags));
+    ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS));
+
+    gpio_reset_pin(20);    
+    gpio_set_direction(20, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(22);    
+    gpio_set_direction(22, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(12);    
+    gpio_set_direction(12, GPIO_MODE_OUTPUT);
     //-------------ADC1 Init---------------//
     adc_oneshot_unit_handle_t adc1_handle;
     adc_oneshot_unit_init_cfg_t init_config1 = {
@@ -48,25 +89,37 @@ void app_main(void)
     size_t num_terations = 0;
     size_t max_num_terations = 300;
     int64_t start_time = esp_timer_get_time();
-    while (1)
-    {        
-        
 
-        for (int j = 0; j < num_channels; j++)
+
+    char data[100];
+    memset(data,'#',100);
+
+    while (1)
+    {
+        for (int mux = 0; mux < num_mux_channels; mux++)
         {
-            for (int i = 0; i < num_channels; i++)
+            // switch mux channel
+            gpio_set_level(20, (mux >> 0) & 0x1);               
+            gpio_set_level(22, (mux >> 1) & 0x1);               
+            gpio_set_level(12, (mux >> 2) & 0x1);                       
+
+            for (int adc = 0; adc < num_channels; adc++)
             {
+                int i = mux + (adc * num_channels);
+                
+                int total = 0;
                 for (size_t av = 0; av < 3; av++)
                 {
                     int temp;
-                    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, adc_channels[i], &temp));
-                    adc_raw[i + num_channels * j] += temp;
+                    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, adc_channels[adc], &temp));
+                    total += temp;
                 }
-                adc_raw[i + num_channels * j] /= 3;
+                adc_raw[i] = total / 3;
             }
         }
-
-        memset(adc_raw, 0, sizeof(adc_raw));
+        
+        uart_write_bytes(ECHO_UART_PORT_NUM, (const char *) data, 100);
+        
         num_terations++;
 
         if (num_terations == max_num_terations)
@@ -75,10 +128,16 @@ void app_main(void)
             num_terations = 0;
             int64_t duration = (esp_timer_get_time() - start_time) / 1000ll;
             ESP_LOGI(TAG, "100 Iterations: %lldms", duration);
-            ESP_LOGI(TAG, "Single Iteration: %lldms", duration/max_num_terations);
+            ESP_LOGI(TAG, "Single Iteration: %lldms", duration / max_num_terations);
             start_time = esp_timer_get_time();
         }
     }
+}
+//-----------------------------------------------------------------------------
+
+void app_main(void)
+{
+    xTaskCreate(analog_read_task, "analog_read_task", 4096, NULL, 10, NULL);
 }
 
 //-----------------------------------------------------------------------------
