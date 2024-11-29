@@ -127,7 +127,7 @@ static void analog_read_task(void *arg)
             vTaskDelay(1);
             num_terations = 0;
             int64_t duration = (esp_timer_get_time() - start_time) / 1000ll;
-            ESP_LOGI(TAG, "100 Iterations: %lldms", duration);
+            ESP_LOGI(TAG, "%d Iterations: %lldms",max_num_terations, duration);
             ESP_LOGI(TAG, "Single Iteration: %lldms", duration / max_num_terations);
             start_time = esp_timer_get_time();
         }
@@ -137,7 +137,7 @@ static void analog_read_task(void *arg)
 
 void app_main(void)
 {
-    xTaskCreate(analog_read_task, "analog_read_task", 4096, NULL, 10, NULL);
+    xTaskCreate(analog_read_task, "analog_read_task", 4096, NULL, 2, NULL);
 }
 
 //-----------------------------------------------------------------------------
